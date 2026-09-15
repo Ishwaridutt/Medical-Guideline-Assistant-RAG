@@ -9,6 +9,7 @@ from groq_client import llm, output_parser
 from medical_assistant_prompt import prompt_template
 from reranker import rerank_documents
 from safety.input_guard import input_guard
+from safety.output_guard import run_output_guardrails
 
 def format_docs(docs: list[Document]) -> str:
   return "\n\n\n".join([
@@ -60,7 +61,6 @@ while True:
     # input guardrails
     try:
         input_guard.validate(user_query)
-        True
     except Exception as e:
         error_message = str(e)
         if "PERSONALIZED_MEDICAL_ADVICE" in error_message:
@@ -90,12 +90,16 @@ while True:
     # run pipeline
     try:
         llm_response = rag_chain.invoke(
-        user_query,
-        config={
-                "run_name": "RAG Pipeline"
-            }
+            user_query,
+            config={
+                    "run_name": "RAG Pipeline"
+                }
         )
-        print(f'Retrieved Result: {llm_response}')
+
+        # apply output guardrail
+        verified_response = run_output_guardrails(response=llm_response)
+
+        print(f'Retrieved Result: {verified_response}')
     except Exception as e:
         print(
             f"\nAn error occurred while processing your query: {e}"
