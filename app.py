@@ -4,7 +4,7 @@ load_dotenv()
 
 from safety.input_guard import handle_input_guardrail
 from safety.output_guard import run_output_guardrails
-from rag.retrieval_pipeline import rag_chain
+from rag.rag_pipeline import rag_chain
 
 
 def main():
@@ -17,6 +17,11 @@ def main():
         if user_query.lower() == "exit":
             print("\nExiting RAG application. Goodbye!")
             break
+
+        # Check for empty input
+        if not user_query:
+            print("Query cannot be empty. Please enter a valid prompt.")
+            continue
 
          # Input guardrails
         input_guardrail_check_result = handle_input_guardrail(user_query)

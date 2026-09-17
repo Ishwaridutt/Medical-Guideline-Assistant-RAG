@@ -1,26 +1,23 @@
 import json
 import re
 from guardrails.validators import register_validator, Validator, PassResult, FailResult
-from clients.groq_client import llm
+from clients.groq_client import llm_client
 from prompts.medical_intent_prompt import get_medical_intent_prompt, get_medical_intent_types
 
 @register_validator(
-    name="medical_intent_validator",
-    data_type="string"
+    name = "medical_intent_validator",
+    data_type = "string"
 )
 class MedicalIntentValidator(Validator):
 
-    def __init__(self, on_fail="exception"):
-        super().__init__(on_fail=on_fail)
+    def __init__(self, on_fail = "exception"):
+        super().__init__(on_fail = on_fail)
 
     def validate(self, user_query, metadata=None):
 
         prompt = get_medical_intent_prompt(user_query)
         # call the intent classifier llm model
-        print('in medical intent classifier')
-        response = llm.invoke(prompt)
-        print('in medical intent classifier 2', response)
-
+        response = llm_client.invoke(prompt)
         # LangChain AIMessage -> string
         if hasattr(response, "content"):
             response = response.content

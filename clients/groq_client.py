@@ -6,7 +6,7 @@ from langchain_groq import ChatGroq
 from langchain_core.output_parsers import StrOutputParser
 from config.config import GROQ_MODEL_NAME, GROQ_LLAMA_MODEL_NAME
 
-llm = ChatGroq(model = GROQ_MODEL_NAME)
+llm_client = ChatGroq(model = GROQ_MODEL_NAME)
 
 # llama_llm = ChatGroq(model = GROQ_LLAMA_MODEL_NAME)
 

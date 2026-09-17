@@ -1,16 +1,17 @@
 from sentence_transformers import CrossEncoder
 from langchain_core.documents import Document
+from config.config import CROSS_ENCODER_MODEL_NAME
 
 # Load Cross Encoder model
 cross_encoder_reranker_model = CrossEncoder(
-    "BAAI/bge-reranker-base",
+    CROSS_ENCODER_MODEL_NAME,
     device = "mps"
 )
 
 def rerank_documents(
     query: str,
     documents: list[Document],
-    top_k: int = 5
+    top_k: int = 4
 ) -> list[Document]:
 
     if not documents:
@@ -41,3 +42,4 @@ def rerank_documents(
         reranked_documents.append(doc)
 
     return reranked_documents
+

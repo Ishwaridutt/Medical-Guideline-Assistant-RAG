@@ -2,7 +2,7 @@ import json
 from langchain_core.runnables import RunnableLambda
 from rag.hyde import generate_hyde
 from config.config import HYDE_TRIGGER_THRESHOLD
-from clients.groq_client import llm
+from clients.groq_client import llm_client
 from prompts.query_router_prompt import get_query_router_hyde_check_prompt
 
 
@@ -14,7 +14,7 @@ def get_query_quality_score(query: str) -> float:
     This will be replaced by the small transformer model.
     """
     hyde_check_prompt = get_query_router_hyde_check_prompt(query)
-    response = llm.invoke(hyde_check_prompt)
+    response = llm_client.invoke(hyde_check_prompt)
     print('\nQuery quality analyzer model response: ', response)
     # verify and parse the response
     try:
@@ -56,9 +56,9 @@ def route_query(query: str) -> dict:
         print("HyDE is not required as user query score is:", score)
         retrieval_query = query
         hyde_used = False
-
+    # in case hyde is not used, we pass back the original query in the retrieval query
     return {
-        "user_question": query,
+        "original_query": query,
         "retrieval_query": retrieval_query,
         "hyde_used": hyde_used,
         "query_quality_score": score,

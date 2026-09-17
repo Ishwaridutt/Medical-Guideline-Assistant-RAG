@@ -1,6 +1,6 @@
 # from citation_guardrail import verify_citations
 from safety.output_intent_classification_guard import apply_safety_guardrail
-from clients.groq_client import llm
+from clients.groq_client import llm_client
 
 def format_output(response: str) -> str:
     response = response.strip()
@@ -27,7 +27,7 @@ def run_output_guardrails(
     # 2. output intent safety classification
     safe_response = apply_safety_guardrail(
         response,
-        llm
+        llm_client
     )
     return safe_response["response"]
  
