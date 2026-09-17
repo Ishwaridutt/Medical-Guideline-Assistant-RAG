@@ -1,5 +1,5 @@
 import json
-from safety.validators.safety_classification_prompt import SAFE_REFUSAL, SAFETY_CLASSIFICATION_PROMPT
+from prompts.safety_classification_prompt import SAFE_REFUSAL, SAFETY_CLASSIFICATION_PROMPT
 
 
 def classify_output(response: str, llm) -> str:

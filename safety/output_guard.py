@@ -1,6 +1,6 @@
 # from citation_guardrail import verify_citations
 from safety.output_intent_classification_guard import apply_safety_guardrail
-from groq_client import llm
+from clients.groq_client import llm
 
 def format_output(response: str) -> str:
     response = response.strip()

@@ -13,6 +13,5 @@ langsmith
 rank-bm25 
 fastembed
 guardrails-ai
-
-
+guardrails-ai-prompt-injection-detector
 

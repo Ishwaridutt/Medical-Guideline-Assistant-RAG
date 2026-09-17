@@ -1,8 +1,8 @@
 import json
 import re
 from guardrails.validators import register_validator, Validator, PassResult, FailResult
-from groq_client import llm
-from safety.validators.medical_intent_prompt import get_medical_intent_prompt, get_medical_intent_types
+from clients.groq_client import llm
+from prompts.medical_intent_prompt import get_medical_intent_prompt, get_medical_intent_types
 
 @register_validator(
     name="medical_intent_validator",
@@ -17,7 +17,10 @@ class MedicalIntentValidator(Validator):
 
         prompt = get_medical_intent_prompt(user_query)
         # call the intent classifier llm model
+        print('in medical intent classifier')
         response = llm.invoke(prompt)
+        print('in medical intent classifier 2', response)
+
         # LangChain AIMessage -> string
         if hasattr(response, "content"):
             response = response.content
@@ -28,7 +31,7 @@ class MedicalIntentValidator(Validator):
             r"```(?:json)?\s*|\s*```",
             "",
             response,
-            flags=re.MULTILINE
+            flags = re.MULTILINE
         ).strip()
 
         try:
@@ -40,11 +43,11 @@ class MedicalIntentValidator(Validator):
                     "Failing closed for safety."
                 )
             )
-
+        # user query intent
         intent = result.get("intent")
+        print('medical intent:', intent)
         # check if the intent returned is defined inside the allowed intent
         allowed_intents = get_medical_intent_types()
-
         if intent not in allowed_intents:
             return FailResult(
                 error_message=(

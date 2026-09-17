@@ -7,7 +7,7 @@ from langchain_community.document_loaders import PyPDFLoader, PyPDFDirectoryLoad
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 # from langchain_openai import OpenAIEmbeddings
 from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
-from Config.config import DENSE_EMBEDDING_MODEL_NAME, SPARSE_EMBEDDING_MODEL_NAME, COLLECTION_NAME, QDRANT_URL
+from config.config import DENSE_EMBEDDING_MODEL_NAME, SPARSE_EMBEDDING_MODEL_NAME, COLLECTION_NAME, QDRANT_URL
 from pathlib import Path
 
 # To load the .env file
@@ -18,7 +18,7 @@ from pathlib import Path
 # PDF_FOLDER_PATH = "./Documents/MoHFW Official Medical Documentation"
 
 # configs
-PDF_FOLDER_PATH = "./Documents"
+PDF_FOLDER_PATH = "./documents"
 
 # Load the document
 print('Loading PDF files...')
@@ -31,7 +31,7 @@ print(f"Loaded {len(docs)} pages")
 
 # Semantic Chunking
 text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size = 1000,
+    chunk_size = 800,
     chunk_overlap = 200
 )
 

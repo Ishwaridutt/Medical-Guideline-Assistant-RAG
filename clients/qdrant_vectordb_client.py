@@ -1,6 +1,6 @@
 from langchain_qdrant import QdrantVectorStore, RetrievalMode, FastEmbedSparse
 from langchain_huggingface import HuggingFaceEmbeddings
-from Config.config import SPARSE_EMBEDDING_MODEL_NAME, QDRANT_URL, DENSE_EMBEDDING_MODEL_NAME, COLLECTION_NAME
+from config.config import SPARSE_EMBEDDING_MODEL_NAME, QDRANT_URL, DENSE_EMBEDDING_MODEL_NAME, COLLECTION_NAME
 
 TOP_K_RESULTS_VALUE = 10
 
