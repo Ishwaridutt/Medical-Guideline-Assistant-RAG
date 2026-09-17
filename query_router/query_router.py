@@ -15,12 +15,12 @@ def get_query_quality_score(query: str) -> float:
     """
     hyde_check_prompt = get_query_router_hyde_check_prompt(query)
     response = llm_client.invoke(hyde_check_prompt)
-    print('\nQuery quality analyzer model response: ', response)
     # verify and parse the response
     try:
         if hasattr(response, "content"):
             response = response.content
 
+        print('\nQuery quality analyzer model response: ', response)
         result = json.loads(response)
 
     except json.JSONDecodeError:

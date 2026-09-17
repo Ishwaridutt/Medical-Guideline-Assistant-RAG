@@ -1,6 +1,11 @@
 # Import of the required libraries
 from dotenv import load_dotenv
 load_dotenv()
+import sys
+from pathlib import Path
+
+# Adds the 'src' directory to Python's search path
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.document_loaders import PyPDFLoader, PyPDFDirectoryLoader
@@ -8,7 +13,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 # from langchain_openai import OpenAIEmbeddings
 from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
 from config.config import DENSE_EMBEDDING_MODEL_NAME, SPARSE_EMBEDDING_MODEL_NAME, COLLECTION_NAME, QDRANT_URL
-from pathlib import Path
+# from pathlib import Path
 
 # To load the .env file
 # load_dotenv()

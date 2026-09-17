@@ -1,697 +1,1036 @@
-# Medical Guideline RAG
+# Medical Guideline RAG Assistant
 
-A production-oriented **Retrieval-Augmented Generation (RAG)** system for querying medical guidelines and returning answers grounded in the retrieved source documents.
+A production-oriented **Retrieval-Augmented Generation (RAG)** system designed to answer questions using information retrieved from official medical guidelines.
 
-The project focuses on building a reliable and safety-conscious RAG pipeline rather than simply connecting an LLM to a vector database.
+The project combines **hybrid retrieval, cross-encoder reranking, HyDE-based query improvement, Corrective RAG (CRAG), and input/output guardrails** to improve retrieval quality, answer grounding, and safety.
 
-## ⚠️ Medical Disclaimer
-
-This project is an **experimental / educational AI system** and is **not a medical device, diagnostic system, or substitute for professional medical advice**.
-
-The generated responses should not be used to diagnose, treat, or make clinical decisions about a patient.
-
-Always consult a qualified healthcare professional and the original medical guidelines for clinical decisions.
+> **Disclaimer:** This project is for educational and experimental purposes. It is not a diagnostic, treatment, or emergency medical system.
 
 ---
 
-## 🎯 Project Goals
+## Architecture
 
-The goal of this project is to explore how a production-oriented RAG system can improve retrieval quality, answer grounding, observability, and safety when working with medical guideline documents.
-
-The system focuses on:
-
-* Hybrid information retrieval
-* Query routing
-* HyDE-based retrieval for difficult queries
-* Cross-encoder reranking
-* Input safety guardrails
-* Output validation
-* Citation / source grounding
-* Observability with LangSmith
-* Modular RAG architecture
-
----
-
-## 🏗️ Architecture
-
-The high-level pipeline looks like this:
+The system follows a multi-stage RAG pipeline:
 
 ```text
-                         User Query
-                              │
-                              ▼
-                    ┌──────────────────┐
-                    │  Input Guardrails│
-                    └────────┬─────────┘
-                             │
-                    ┌────────▼─────────┐
-                    │   Query Router   │
-                    └────────┬─────────┘
-                             │
-                  ┌──────────┴──────────┐
-                  │                     │
-                  ▼                     ▼
-          Direct Retrieval            HyDE
-                  │                     │
-                  │              Generate Hypothetical
-                  │                  Document
-                  │                     │
-                  └──────────┬──────────┘
-                             ▼
-                  ┌─────────────────────┐
-                  │  Hybrid Retrieval   │
-                  │                     │
-                  │ Dense + Sparse      │
-                  │      +              │
-                  │       RRF           │
-                  └──────────┬──────────┘
-                             │
-                             ▼
-                  ┌─────────────────────┐
-                  │ Cross-Encoder       │
-                  │     Reranking       │
-                  └──────────┬──────────┘
-                             │
-                             ▼
-                  ┌─────────────────────┐
-                  │ Context Construction│
-                  └──────────┬──────────┘
-                             │
-                             ▼
-                  ┌─────────────────────┐
-                  │        LLM          │
-                  │  Grounded Answer    │
-                  └──────────┬──────────┘
-                             │
-                             ▼
-                  ┌─────────────────────┐
-                  │ Output Guardrails   │
-                  └──────────┬──────────┘
-                             │
-                             ▼
-                         Final Answer
+                         ┌─────────────────────┐
+                         │      User Query     │
+                         └──────────┬──────────┘
+                                    │
+                                    ▼
+                         ┌─────────────────────┐
+                         │   Input Guardrails  │
+                         │                     │
+                         │ • Medical intent    │
+                         │ • Out-of-scope      │
+                         │ • Emergency/crisis  │
+                         └──────────┬──────────┘
+                                    │
+                                    ▼
+                         ┌─────────────────────┐
+                         │    Query Router     │
+                         │                     │
+                         │ Query Quality Score │
+                         └──────────┬──────────┘
+                                    │
+                    ┌───────────────┴───────────────┐
+                    │                               │
+             Good retrieval query            Weak query
+                    │                               │
+                    │                               ▼
+                    │                       ┌──────────────┐
+                    │                       │     HyDE      │
+                    │                       │              │
+                    │                       │ Generate     │
+                    │                       │ hypothetical │
+                    │                       │ document     │
+                    │                       └──────┬───────┘
+                    │                              │
+                    └──────────────┬───────────────┘
+                                   │
+                                   ▼
+                       ┌──────────────────────┐
+                       │   Hybrid Retrieval   │
+                       │                      │
+                       │ Dense + Sparse       │
+                       │ Qdrant RRF           │
+                       └──────────┬───────────┘
+                                  │
+                                  ▼
+                       ┌──────────────────────┐
+                       │ Cross-Encoder        │
+                       │ Reranking            │
+                       └──────────┬───────────┘
+                                  │
+                                  ▼
+                       ┌──────────────────────┐
+                       │       CRAG           │
+                       │                      │
+                       │ Evaluate retrieved   │
+                       │ documents            │
+                       └──────────┬───────────┘
+                                  │
+                    ┌─────────────┴─────────────┐
+                    │                           │
+              Relevant enough              Not relevant
+                    │                           │
+                    │                           ▼
+                    │                  ┌─────────────────┐
+                    │                  │ Query Correction│
+                    │                  │ + Retry         │
+                    │                  └────────┬────────┘
+                    │                           │
+                    │                    bounded retries
+                    │                           │
+                    │                           └──────┐
+                    │                                  │
+                    └──────────────────┬───────────────┘
+                                       │
+                                       ▼
+                            ┌─────────────────────┐
+                            │        LLM          │
+                            │                     │
+                            │ Grounded generation │
+                            └──────────┬──────────┘
+                                       │
+                                       ▼
+                            ┌─────────────────────┐
+                            │  Output Guardrails  │
+                            │                     │
+                            │ • Citation checks   │
+                            │ • Claim grounding   │
+                            │ • Safety checks     │
+                            │ • Medical advice    │
+                            └──────────┬──────────┘
+                                       │
+                                       ▼
+                            ┌─────────────────────┐
+                            │    Final Answer     │
+                            └─────────────────────┘
 ```
 
 ---
 
-## 🔍 Retrieval Pipeline
+# End-to-End Flow
 
-### 1. Dense Retrieval
+The complete flow is:
 
-The system uses semantic embeddings to retrieve documents based on the meaning of the query.
+```text
+User Query
+    ↓
+Input Guardrails
+    ↓
+Query Quality Evaluation
+    ↓
+┌─────────────────────────────┐
+│ Is the query retrieval-ready?│
+└──────────────┬──────────────┘
+               │
+       ┌───────┴───────┐
+       │               │
+      YES              NO
+       │               │
+       │              HyDE
+       │               ↓
+       │       Hypothetical Document
+       │               │
+       └───────┬───────┘
+               ↓
+        Hybrid Retrieval
+               ↓
+        Cross-Encoder
+          Reranking
+               ↓
+             CRAG
+               ↓
+     Evaluate Retrieved Context
+               ↓
+       ┌───────┴────────┐
+       │                │
+    Relevant         Not Relevant
+       │                │
+       │                ↓
+       │          Correct Query
+       │                ↓
+       │             Retry
+       │                │
+       │        ┌───────┴───────┐
+       │        │               │
+       │     Success        Max retries
+       │        │               │
+       └────────┤               ↓
+                │          Safe Failure
+                ↓
+              LLM
+                ↓
+        Output Guardrails
+                ↓
+          Final Answer
+```
 
-Current embedding model:
+---
+
+# Key Components
+
+## 1. Input Guardrails
+
+Input guardrails run before retrieval.
+
+They prevent inappropriate queries from entering the RAG pipeline, including:
+
+* Personalized medical advice
+* Emergency or crisis requests
+* Non-medical/out-of-scope queries
+
+The guardrail can short-circuit the pipeline when the input should not proceed to retrieval.
+
+```text
+User Query
+    ↓
+Input Guardrail
+    ↓
+Invalid / Unsafe ─────→ Safe Refusal
+    │
+    └── Valid
+         ↓
+      RAG Pipeline
+```
+
+---
+
+# 2. Query Router
+
+The query router determines whether the original query is suitable for direct retrieval.
+
+A model-based **query quality score** is generated between `0` and `1`.
+
+Conceptually:
+
+```text
+High Score
+    ↓
+Direct Retrieval
+
+Low Score
+    ↓
+HyDE
+    ↓
+Hypothetical Document
+    ↓
+Retrieval
+```
+
+The important distinction is that the system keeps the original question separate from the retrieval query.
+
+```python
+{
+    "user_question": original_query,
+    "retrieval_query": retrieval_query,
+    "hyde_used": True,
+    "query_quality_score": score
+}
+```
+
+This allows the system to:
+
+* Retrieve using the improved query
+* Generate the final answer against the original question
+* Evaluate CRAG against the original question
+
+---
+
+# 3. HyDE — Hypothetical Document Embeddings
+
+**HyDE (Hypothetical Document Embeddings)** is used when the query is considered less suitable for direct retrieval.
+
+Instead of immediately searching using the user's question, the system generates a hypothetical answer/document that represents what relevant guideline content might look like.
+
+```text
+Original Query
+      ↓
+Query Quality Evaluation
+      ↓
+Low Retrieval Suitability
+      ↓
+Generate Hypothetical Document
+      ↓
+Use Hypothetical Document
+as Retrieval Query
+      ↓
+Hybrid Retrieval
+```
+
+The hypothetical document is used to improve retrieval.
+
+It is **not treated as factual medical evidence** and is not directly passed to the final answer as authoritative context.
+
+The final answer is generated from retrieved guideline documents.
+
+---
+
+# 4. Hybrid Retrieval
+
+The project uses **Qdrant hybrid retrieval** combining:
+
+* Dense vector retrieval
+* Sparse/BM25 retrieval
+* Reciprocal Rank Fusion (RRF)
+
+### Dense Retrieval
+
+Dense embeddings are generated using:
 
 ```text
 BAAI/bge-base-en-v1.5
 ```
 
-Embeddings are normalized before being stored and queried.
+This captures semantic similarity between queries and guideline content.
 
----
+### Sparse Retrieval
 
-### 2. Sparse Retrieval
-
-The system also uses sparse retrieval to capture exact terminology, keywords, medical terms, and other lexical matches.
-
-Current sparse model:
+Sparse retrieval uses:
 
 ```text
 Qdrant/bm25
 ```
 
----
+This helps preserve lexical matching for important medical terminology.
 
-### 3. Hybrid Retrieval
+### Hybrid Retrieval
 
-Dense and sparse retrieval are combined using Qdrant's hybrid retrieval capabilities.
-
-Conceptually:
+Qdrant combines the dense and sparse retrieval signals using hybrid retrieval/RRF.
 
 ```text
-User Query
-    │
-    ├── Dense Search ──► Semantic Matches
-    │
-    └── Sparse Search ─► Keyword Matches
-                          │
-                          ▼
-                         RRF
-                          │
-                          ▼
-                  Combined Candidates
+                 Query
+                   │
+          ┌────────┴────────┐
+          │                 │
+     Dense Search       Sparse Search
+          │                 │
+          │            BM25 matching
+          │                 │
+          └────────┬────────┘
+                   ↓
+                 RRF
+                   ↓
+          Combined Candidates
 ```
-
-This allows the system to benefit from both:
-
-* Semantic similarity
-* Exact lexical matching
 
 ---
 
-## 🔄 Query Routing
+# 5. Cross-Encoder Reranking
 
-Not every query benefits equally from HyDE.
+After hybrid retrieval, the retrieved documents are reranked using a cross-encoder.
 
-The system therefore evaluates the query before retrieval.
-
-```text
-Query
-  │
-  ▼
-Query Quality Scoring
-  │
-  ├── High score ──► Direct Retrieval
-  │
-  └── Low score ───► HyDE
-```
-
-The query-quality scoring component currently uses a model-based approach and is designed to be replaceable with a smaller dedicated transformer model in the future.
-
-The intent is:
-
-> Determine whether the original query is already suitable for retrieval or whether generating a hypothetical answer/document could produce a better retrieval representation.
-
----
-
-## 🧠 HyDE
-
-For queries that are considered difficult for direct retrieval, the system uses **Hypothetical Document Embeddings (HyDE)**.
-
-Instead of embedding only the original query:
+Instead of relying only on embedding similarity, the reranker evaluates the relationship between:
 
 ```text
-"What are the criteria for starting treatment?"
+Query ↔ Document
 ```
 
-the system generates a hypothetical document representing the type of content that would ideally answer the query.
-
-The generated hypothetical document is then used as the retrieval representation.
-
-Conceptually:
-
-```text
-User Query
-    │
-    ▼
-Hypothetical Answer / Document
-    │
-    ▼
-Embedding
-    │
-    ▼
-Hybrid Retrieval
-```
-
-HyDE is used selectively rather than for every query.
-
----
-
-## 🎯 Cross-Encoder Reranking
-
-Initial retrieval is optimized for recall.
-
-The resulting candidate documents are then passed through a cross-encoder reranker to improve the ordering of the retrieved context.
+This provides a second-stage relevance check before documents are passed further into the pipeline.
 
 ```text
 Hybrid Retrieval
-      │
-      ▼
-Top-N Candidates
-      │
-      ▼
-Cross Encoder
-      │
-      ▼
-Re-ranked Documents
-      │
-      ▼
-Top-K Context
+      ↓
+Candidate Documents
+      ↓
+Cross-Encoder
+      ↓
+Reranked Documents
 ```
-
-This separates the retrieval and ranking responsibilities:
-
-* **Retriever:** Find potentially relevant documents.
-* **Reranker:** Determine which retrieved documents are most relevant to the specific query.
 
 ---
 
-## 🛡️ Safety & Guardrails
+# 6. CRAG — Corrective RAG
 
-Because the system operates on medical information, safety is treated as a first-class component.
+CRAG is used to determine whether the retrieved context is actually relevant enough to answer the user's question.
 
-### Input Guardrails
+The system evaluates retrieved documents against the **original user query**.
 
-The input layer evaluates the user's query before retrieval.
+This is important because HyDE may change the retrieval query, but CRAG should still determine whether the retrieved evidence answers what the user actually asked.
 
-The project includes checks for:
-
-* Out-of-scope medical requests
-* Requests requiring personalized medical advice
-* Emergency / crisis-related requests
-* Prompt injection attempts
-
-Unsafe or unsupported queries can be short-circuited before they reach the retrieval pipeline.
+### CRAG Flow
 
 ```text
-User Query
-    │
-    ▼
-Input Guardrails
-    │
-    ├── Unsafe / Out of Scope
-    │          │
-    │          ▼
-    │       Refusal
-    │
-    └── Safe
-         │
-         ▼
-      Retrieval
+Original User Query
+        │
+        │
+        ▼
+Retrieved Documents
+        │
+        ▼
+Document Relevance Evaluation
+        │
+        ▼
+Relevant Documents
+        │
+        ▼
+CRAG Decision
 ```
 
-### Output Guardrails
-
-The generated response is also validated before being returned.
-
-The output validation layer is intended to ensure that responses:
-
-* Remain grounded in retrieved context
-* Contain valid source references
-* Do not introduce unsupported claims
-* Respect the application's medical-safety constraints
-
----
-
-## 📚 Document Processing
-
-Medical guideline documents are processed before being added to the retrieval system.
-
-The general indexing pipeline is:
+If the retrieved context is sufficiently relevant:
 
 ```text
-Medical Guidelines
-       │
-       ▼
-Document Loading
-       │
-       ▼
-Chunking
-       │
-       ▼
-Metadata Enrichment
-       │
-       ▼
-Dense Embeddings
-       │
-       ▼
-Sparse Representation
-       │
-       ▼
-Qdrant
+CRAG_SUCCESS
+     ↓
+Generate Answer
 ```
 
-Each chunk retains metadata such as its source document and page information so that retrieved information can be traced back to the original guideline.
-
----
-
-## 🗄️ Vector Database
-
-The project uses **Qdrant** as the vector database.
-
-Qdrant stores the representations required for hybrid retrieval:
+If the context is insufficient:
 
 ```text
-Qdrant
- ├── Dense vectors
- ├── Sparse vectors
- └── Document metadata
+CRAG_FAILED
+     ↓
+Correct / Rewrite Retrieval Query
+     ↓
+Retrieve Again
+     ↓
+Rerank Again
+     ↓
+Evaluate Again
 ```
-
-This allows the application to perform dense and sparse retrieval without maintaining a separate application-level BM25 index.
 
 ---
 
-## 🔬 Observability
+## CRAG Retry Protection
 
-The RAG pipeline is instrumented using **LangSmith**.
+A corrective loop can potentially continue forever.
 
-The objective is to maintain a clean trace for each user query.
+To prevent this, the pipeline tracks the retry count.
 
-A typical trace represents the complete flow:
+Conceptually:
+
+```python
+retry_count = 0
+
+while retry_count < MAX_RETRIES:
+    retrieve()
+    rerank()
+    evaluate()
+
+    if relevant:
+        break
+
+    retry_count += 1
+    correct_query()
+```
+
+The retry limit ensures that CRAG remains bounded.
+
+Example configuration:
+
+```text
+MAX_RETRIES = 2
+```
+
+The exact threshold and retry count are configurable.
+
+---
+
+# 7. Grounded LLM Generation
+
+Once CRAG accepts the retrieved context, the documents are formatted and passed to the LLM.
+
+The prompt instructs the model to answer using the retrieved guideline context.
+
+The context contains metadata such as:
+
+```text
+Page Content
+Page Number
+Chunk Id
+File Location
+```
+
+This allows generated answers to reference the source material.
+
+The LLM should not treat HyDE output or unsupported model knowledge as authoritative evidence.
+
+---
+
+# 8. Output Guardrails
+
+After the LLM generates an answer, the output passes through output guardrails.
+
+The output checks include:
+
+### Citation Validation
+
+Verify that cited `chunk_id`s exist in the retrieved context.
+
+### Claim Grounding
+
+Check whether generated claims are supported by the retrieved guideline content.
+
+### Medical Safety
+
+Detect problematic output such as:
+
+* Personalized medical advice
+* Diagnostic language
+* Dosing instructions
+* Emergency guidance
+
+### Standard Disclaimer
+
+The final assistant response includes:
+
+> This assistant provides information from official guidelines only and does not give personalized medical advice.
+
+---
+
+# Complete Pipeline
+
+At a high level, the project now follows:
+
+```text
+                         USER
+                          │
+                          ▼
+                  INPUT GUARDRAILS
+                          │
+                          ▼
+                   QUERY ROUTER
+                          │
+                Query Quality Score
+                          │
+             ┌────────────┴────────────┐
+             │                         │
+          Direct                     HyDE
+        Retrieval                     │
+             │              Hypothetical Document
+             │                         │
+             └────────────┬────────────┘
+                          │
+                          ▼
+                 HYBRID RETRIEVAL
+                 Dense + Sparse
+                          │
+                          ▼
+                 QDRANT + RRF
+                          │
+                          ▼
+              CROSS-ENCODER RERANKING
+                          │
+                          ▼
+                         CRAG
+                          │
+             ┌────────────┴────────────┐
+             │                         │
+           PASS                       FAIL
+             │                         │
+             │                  Correct Query
+             │                         │
+             │                       Retry
+             │                         │
+             │                 ┌───────┴───────┐
+             │                 │               │
+             │              Success       Max Retries
+             │                 │               │
+             └─────────────────┘               │
+                                               ▼
+                                         Safe Failure
+             │
+             ▼
+             LLM
+             │
+             ▼
+      OUTPUT GUARDRAILS
+             │
+             ▼
+       FINAL ANSWER
+```
+
+---
+
+# LangSmith Observability
+
+The project uses **LangSmith** for tracing and observability.
+
+The goal is to keep the complete request inside a single trace:
 
 ```text
 RAG Pipeline
-    │
-    ├── Input Guardrails
-    ├── Query Router
-    ├── HyDE (when required)
-    ├── Retrieval
-    ├── Reranking
-    ├── Prompt
-    ├── LLM
-    └── Output Guardrails
+│
+├── Input Guardrails
+├── Query Router
+│   └── Query Quality Evaluation
+│   └── HyDE (when required)
+│
+├── CRAG
+│   ├── Retrieval
+│   ├── Reranking
+│   ├── Relevance Evaluation
+│   └── Correction / Retry
+│
+├── LLM Generation
+│
+└── Output Guardrails
 ```
 
-This makes it possible to investigate:
+The top-level trace is configured with:
 
-* Which retrieval path was selected
-* Whether HyDE was triggered
-* Retrieved documents
-* Reranking results
-* LLM input/output
-* Guardrail decisions
-* Overall latency
+```python
+config = {
+    "run_name": "RAG Pipeline"
+}
+```
 
----
-
-## 🧰 Technology Stack
-
-| Component              | Technology                 |
-| ---------------------- | -------------------------- |
-| Language               | Python                     |
-| RAG Framework          | LangChain                  |
-| Vector Database        | Qdrant                     |
-| Dense Embeddings       | BAAI/bge-base-en-v1.5      |
-| Sparse Retrieval       | Qdrant BM25                |
-| LLM                    | Groq                       |
-| Reranking              | Cross-Encoder              |
-| Observability          | LangSmith                  |
-| Environment Management | python-dotenv              |
-| Local Development      | Python virtual environment |
+CRAG retry cycles should remain visible inside the same request trace so retrieval corrections and evaluation decisions can be inspected.
 
 ---
 
-## 📁 Project Structure
+# Technology Stack
 
-The project is intentionally split into separate components so that individual RAG stages can be developed and tested independently.
+| Component            | Technology              |
+| -------------------- | ----------------------- |
+| Language             | Python                  |
+| RAG Framework        | LangChain               |
+| Vector Database      | Qdrant                  |
+| Dense Embeddings     | `BAAI/bge-base-en-v1.5` |
+| Sparse Retrieval     | `Qdrant/bm25`           |
+| Retrieval            | Hybrid Dense + Sparse   |
+| Fusion               | RRF                     |
+| Reranking            | Cross-Encoder           |
+| LLM                  | Groq                    |
+| Query Improvement    | HyDE                    |
+| Retrieval Correction | CRAG                    |
+| Guardrails           | Guardrails AI           |
+| Observability        | LangSmith               |
+| Environment          | python-dotenv           |
+
+---
+
+# Project Structure
+
+The project is organized into separate components so that retrieval, query processing, CRAG, and safety logic remain independent.
 
 ```text
 medical-guideline-rag/
 │
 ├── Documents/
-│   └── medical_guidelines.pdf
+│   └── *.pdf
 │
 ├── src/
+│   │
 │   ├── ingestion/
-│   │   ├── document_loader.py
-│   │   ├── chunking.py
-│   │   └── indexing.py
+│   │   ├── loader.py
+│   │   ├── chunker.py
+│   │   └── indexer.py
 │   │
 │   ├── retrieval/
-│   │   ├── qdrant_vectordb_client.py
 │   │   ├── retriever.py
+│   │   ├── hybrid_retriever.py
 │   │   └── reranker.py
 │   │
 │   ├── query/
 │   │   ├── query_router.py
-│   │   ├── hyde.py
-│   │   └── query_quality.py
+│   │   └── hyde.py
 │   │
-│   ├── guards/
+│   ├── crag/
+│   │   ├── evaluator.py
+│   │   ├── corrector.py
+│   │   └── pipeline.py
+│   │
+│   ├── safety/
 │   │   ├── input_guard.py
 │   │   └── output_guard.py
 │   │
-│   ├── llm/
-│   │   └── groq_client.py
+│   ├── prompts/
+│   │   ├── rag_prompt.py
+│   │   ├── hyde_prompt.py
+│   │   └── crag_prompt.py
 │   │
-│   └── prompts/
-│       └── prompts.py
+│   └── llm/
+│       └── client.py
 │
 ├── tests/
 │
-├── .env.example
+├── main.py
+├── .env
 ├── requirements.txt
-├── README.md
-└── main.py
-```
-
-> The exact structure may evolve as the project develops.
-
----
-
-## ⚙️ Setup
-
-### 1. Clone the repository
-
-```bash
-git clone <repository-url>
-
-cd medical-guideline-rag
-```
-
-### 2. Create a virtual environment
-
-```bash
-python -m venv .venv
-```
-
-Activate it:
-
-#### macOS / Linux
-
-```bash
-source .venv/bin/activate
-```
-
-#### Windows
-
-```bash
-.venv\Scripts\activate
+└── README.md
 ```
 
 ---
 
-### 3. Install dependencies
+# Data Ingestion
+
+The ingestion pipeline performs the following operations:
+
+```text
+Medical Guideline PDFs
+        ↓
+Document Loading
+        ↓
+Text Extraction
+        ↓
+Chunking
+        ↓
+Metadata Enrichment
+        ↓
+Dense Embeddings
+        +
+Sparse BM25 Representation
+        ↓
+Qdrant
+```
+
+Each chunk retains metadata required for traceability, including page information and a unique `chunk_id`.
+
+---
+
+# Retrieval Strategy
+
+The retrieval system uses a multi-stage strategy:
+
+```text
+Query
+  ↓
+Dense Retrieval
+  +
+Sparse Retrieval
+  ↓
+RRF
+  ↓
+Candidate Documents
+  ↓
+Cross-Encoder Reranking
+  ↓
+CRAG Evaluation
+  ↓
+Accepted Context
+```
+
+This separates retrieval into distinct stages:
+
+1. **Recall** — hybrid retrieval finds potentially relevant documents.
+2. **Precision** — cross-encoder reranking improves ordering.
+3. **Correction** — CRAG verifies whether the retrieved evidence is actually useful.
+
+---
+
+# Why HyDE + CRAG?
+
+The two components solve different problems.
+
+### HyDE
+
+HyDE primarily improves the **retrieval query**.
+
+```text
+Weak / ambiguous query
+        ↓
+Hypothetical document
+        ↓
+Better retrieval representation
+```
+
+### CRAG
+
+CRAG evaluates the **retrieved evidence**.
+
+```text
+Retrieved documents
+        ↓
+Are they actually relevant?
+        ↓
+YES → Continue
+NO  → Correct + Retry
+```
+
+Therefore, they complement each other:
+
+```text
+HyDE
+ ↓
+Improve retrieval
+
+Hybrid Retrieval
+ ↓
+Find candidates
+
+Reranker
+ ↓
+Improve ordering
+
+CRAG
+ ↓
+Verify and correct retrieval
+```
+
+---
+
+# Safety Architecture
+
+Safety is applied at multiple stages.
+
+```text
+              User Query
+                  │
+                  ▼
+          ┌───────────────┐
+          │ Input Safety  │
+          └───────┬───────┘
+                  │
+                  ▼
+             RAG Pipeline
+                  │
+                  ▼
+          ┌───────────────┐
+          │ Output Safety │
+          └───────┬───────┘
+                  │
+                  ▼
+            Final Answer
+```
+
+This prevents unsafe or unsupported requests from simply flowing through the retrieval and generation pipeline.
+
+---
+
+# Configuration
+
+Environment variables are loaded using `python-dotenv`.
+
+Example:
+
+```env
+GROQ_MODEL=openai/gpt-oss-120b
+
+LANGSMITH_PROJECT=Medical-guidance-assistant-RAG-1
+
+QDRANT_URL=http://localhost:6333
+
+TOP_K_RESULTS_VALUE=4
+
+HYDE_THRESHOLD=<configured-value>
+
+CRAG_THRESHOLD=<configured-value>
+
+MAX_RETRIES=2
+```
+
+Secrets such as API keys should not be committed to Git.
+
+---
+
+# Running the Project
+
+## 1. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
----
+## 2. Start Qdrant
 
-### 4. Configure environment variables
-
-Create a `.env` file:
-
-```env
-GROQ_API_KEY=
-LANGSMITH_API_KEY=
-LANGSMITH_TRACING=true
-LANGSMITH_PROJECT=
-```
-
-Add any additional provider-specific variables required by the application.
-
-**Never commit `.env` to Git.**
-
----
-
-## 🐳 Running Qdrant
-
-Run Qdrant locally using Docker:
-
-```bash
-docker run -p 6333:6333 qdrant/qdrant
-```
-
-Qdrant should then be available at:
+Make sure Qdrant is running locally:
 
 ```text
 http://localhost:6333
 ```
 
----
+## 3. Add medical guidelines
 
-## 📥 Indexing Documents
-
-Place the medical guideline documents inside:
+Place the required guideline PDFs inside:
 
 ```text
 Documents/
 ```
 
-Run the indexing pipeline:
+## 4. Index the documents
 
-```bash
-python <indexing-script>
-```
+Run the ingestion/indexing process to create the Qdrant collection.
 
-The indexing process will:
+The collection contains the dense and sparse representations required for hybrid retrieval.
 
-1. Load the documents
-2. Split them into chunks
-3. Generate dense embeddings
-4. Generate sparse representations
-5. Store the vectors and metadata in Qdrant
-
----
-
-## ▶️ Running the Application
-
-Start the application:
+## 5. Start the application
 
 ```bash
 python main.py
 ```
 
-Example:
+The application runs in a CLI loop and continues accepting questions until:
 
 ```text
-Enter your question:
-
-What are the recommended criteria for initiating treatment?
-
-Answer:
-...
+exit
 ```
 
-The final response should be grounded in the retrieved medical guideline content and provide source/page information where available.
+is entered.
 
 ---
 
-## 🧪 Example Query Flow
+# Example Request Flow
 
-Example query:
+For a query such as:
 
 ```text
-What are the recommended criteria for initiating treatment?
+What are the recommended diagnostic criteria for malaria?
 ```
 
-The application may process it as:
+the system performs approximately:
 
 ```text
-User Query
-    │
-    ▼
-Input Guardrails
-    │
-    ▼
-Query Quality Score
-    │
-    ▼
-Direct Retrieval / HyDE
-    │
-    ▼
-Qdrant Hybrid Retrieval
-    │
-    ▼
-Cross-Encoder Reranking
-    │
-    ▼
-Relevant Guideline Context
-    │
-    ▼
-LLM
-    │
-    ▼
-Output Validation
-    │
-    ▼
-Grounded Response + Sources
+1. Input Guardrails
+        ↓
+2. Query Quality Evaluation
+        ↓
+3. Direct Retrieval OR HyDE
+        ↓
+4. Qdrant Hybrid Retrieval
+        ↓
+5. Cross-Encoder Reranking
+        ↓
+6. CRAG evaluates retrieved documents
+        ↓
+7. If insufficient:
+       Correct query
+       ↓
+       Retrieve again
+       ↓
+       Rerank again
+       ↓
+       Re-evaluate
+        ↓
+8. Accepted context
+        ↓
+9. LLM generates grounded answer
+        ↓
+10. Output Guardrails
+        ↓
+11. Final response with guideline references
 ```
 
 ---
 
-## 📈 Design Principles
+# Design Principles
+
+The project is built around several principles:
 
 ### 1. Retrieval before generation
 
-The LLM should not be treated as the source of truth.
+The LLM should rely on retrieved guideline evidence rather than attempting to answer purely from model knowledge.
 
-The system retrieves relevant guideline content first and uses that content as the basis for generation.
+### 2. Separate user intent from retrieval optimization
 
-### 2. Recall first, precision second
+The original user query is preserved throughout the pipeline even when HyDE or CRAG modifies the retrieval query.
 
-The retrieval pipeline is intentionally separated into two stages:
+### 3. Multiple retrieval quality checks
+
+Retrieval quality is improved through:
 
 ```text
-Hybrid Retrieval → Recall
-Reranking        → Precision
+Query Quality
+     ↓
+HyDE
+     ↓
+Hybrid Retrieval
+     ↓
+Reranking
+     ↓
+CRAG
 ```
 
-### 3. Query-adaptive retrieval
+### 4. Bounded self-correction
 
-HyDE is not automatically applied to every query.
+CRAG can retry retrieval, but retries are explicitly bounded to prevent infinite loops.
 
-The query router determines whether the query may benefit from hypothetical-document retrieval.
+### 5. Traceability
 
-### 4. Safety before retrieval
+Retrieved chunks retain identifiers and page metadata so generated answers can be traced back to source material.
 
-Potentially unsafe or unsupported requests should be handled before they enter the retrieval and generation pipeline.
+### 6. Safety at both boundaries
 
-### 5. Observability by default
-
-Important RAG decisions should be observable through LangSmith rather than hidden inside application code.
+Input guardrails prevent inappropriate requests from entering the pipeline, while output guardrails inspect generated responses before they reach the user.
 
 ---
 
-## 🚧 Current Status
+# Current RAG Pipeline
 
-This project is under active development.
+The core architecture can be summarized as:
 
-Current components include:
-
-* [x] Medical guideline document ingestion
-* [x] Qdrant vector database
-* [x] Dense retrieval
-* [x] Sparse retrieval
-* [x] Hybrid retrieval
-* [x] RRF-based result fusion
-* [x] Cross-encoder reranking
-* [x] Query routing
-* [x] Model-based query quality scoring
-* [x] HyDE retrieval path
-* [x] Input guardrails
-* [x] Output guardrails
-* [x] LangSmith tracing
-* [ ] Evaluation dataset
-* [ ] Automated retrieval evaluation
-* [ ] Automated end-to-end RAG evaluation
-* [ ] Production deployment
-
----
-
-## 🔮 Future Improvements
-
-Potential improvements include:
-
-* Dedicated lightweight query-routing model
-* Retrieval evaluation using Recall@K / MRR / NDCG
-* RAGAS or equivalent end-to-end evaluation
-* Better citation verification
-* Query rewriting
-* Multi-query retrieval
-* Parent-document retrieval
-* Context compression
-* Automated regression testing for RAG quality
-* Latency and cost optimization
-* Production deployment
-* Continuous evaluation using a medical guideline benchmark
-
----
-
-## ⚠️ Limitations
-
-This system has several important limitations:
-
-* Retrieval quality depends on the quality and coverage of the indexed guidelines.
-* The LLM can still generate unsupported information if retrieval or grounding fails.
-* Medical terminology can be ambiguous.
-* Guidelines may change over time.
-* A retrieved guideline may not represent the most recent clinical recommendation.
-* The system does not replace clinical judgment or professional medical advice.
-
-For any real clinical use case, the system would require substantially stronger validation, governance, security, monitoring, and regulatory review.
-
----
-
-## 📄 License
-
-Add the project's license here.
+```text
+                    ┌──────────────────────┐
+                    │      User Query      │
+                    └──────────┬───────────┘
+                               ↓
+                    ┌──────────────────────┐
+                    │   Input Guardrails   │
+                    └──────────┬───────────┘
+                               ↓
+                    ┌──────────────────────┐
+                    │    Query Router      │
+                    └──────────┬───────────┘
+                               ↓
+                     ┌─────────┴─────────┐
+                     │                   │
+                  Direct                HyDE
+                     │                   │
+                     └─────────┬─────────┘
+                               ↓
+                    ┌──────────────────────┐
+                    │ Hybrid Qdrant Search │
+                    │   Dense + Sparse     │
+                    │       + RRF          │
+                    └──────────┬───────────┘
+                               ↓
+                    ┌──────────────────────┐
+                    │ Cross-Encoder        │
+                    │ Reranking            │
+                    └──────────┬───────────┘
+                               ↓
+                    ┌──────────────────────┐
+                    │        CRAG          │
+                    │ Relevance Evaluation │
+                    └──────────┬───────────┘
+                               ↓
+                      ┌────────┴────────┐
+                      │                 │
+                    PASS              FAIL
+                      │                 │
+                      │          Correct + Retry
+                      │                 │
+                      │          Max retries?
+                      │                 │
+                      └────────┬────────┘
+                               ↓
+                    ┌──────────────────────┐
+                    │     Prompt + LLM     │
+                    └──────────┬───────────┘
+                               ↓
+                    ┌──────────────────────┐
+                    │  Output Guardrails   │
+                    └──────────┬───────────┘
+                               ↓
+                    ┌──────────────────────┐
+                    │    Final Answer      │
+                    └──────────────────────┘
+```
 
 ---
 
-## 👤 Author
+# Future Improvements
 
-Built as a learning and engineering project focused on exploring **production-oriented RAG systems, retrieval optimization, LLM safety, and GenAI engineering**.
+Potential future improvements include:
+
+* Small transformer-based query-quality classifier to replace LLM-based HyDE routing
+* Better CRAG correction strategies
+* More granular document/claim-level grounding evaluation
+* Evaluation datasets for retrieval and answer quality
+* Automated RAG evaluation
+* Additional medical guideline sources
+* Improved observability of individual CRAG retry cycles
+* Retrieval and generation latency monitoring
+* Automated regression testing for retrieval quality
+
+---
+
+## Disclaimer
+
+This project is an experimental/educational implementation of a medical guideline RAG system.
+
+It should **not** be used as a substitute for qualified medical professionals, clinical judgment, diagnosis, treatment decisions, or emergency services.
+
+**This assistant provides information from official guidelines only and does not give personalized medical advice.**
